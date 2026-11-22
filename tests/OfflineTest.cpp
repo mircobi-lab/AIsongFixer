@@ -68,12 +68,25 @@ static bool allFinite (const juce::AudioBuffer<float>& b)
 
 #include "PluginEditor.h"
 
-// --snapshot file.png : salva un'immagine dell'interfaccia dopo aver fatto suonare il segnale di prova
+static bool writeWav (const juce::File& f, const juce::AudioBuffer<float>& b, double sr)
+{
+    f.deleteFile();
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), sr,
+                                                                      (unsigned int) b.getNumChannels(), 24, {}, 0));
+    return w != nullptr && w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+}
+
+// --snapshot file.png : immagine dell'interfaccia Standalone con un brano caricato e un po' di audio elaborato
 static int snapshot (const juce::File& file)
 {
     FixerProcessor p; p.setCurrentProgram (0); p.prepareToPlay (48000, 512);
-    std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
     auto buf = makeSignal (48000, 4.0, 7);
+    const auto wavFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("asf_snapshot.wav");
+    writeWav (wavFile, buf, 48000.0);
+    juce::String err;
+    p.filePlayer.load (wavFile, err);
+    std::unique_ptr<juce::AudioProcessorEditor> ed = std::make_unique<FixerEditor> (p, true);
     juce::MidiBuffer midi;
     for (int start = 0; start < buf.getNumSamples(); start += 512)
     {
@@ -85,7 +98,7 @@ static int snapshot (const juce::File& file)
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.5f);
     juce::FileOutputStream out (file); out.setPosition (0); out.truncate();
     juce::PNGImageFormat().writeImageToStream (img, out);
-    std::cout << "snapshot: " << file.getFullPathName() << std::endl;
+    std::cout << "snapshot: " << file.getFullPathName() << " (" << err << ")" << std::endl;
     return 0;
 }
 
@@ -217,6 +230,64 @@ int main (int argc, char** argv)
             }
             check (allFinite (buf), "DELTA e blocchi irregolari: nessun NaN/inf");
         }
+    }
+
+    // 7) file: caricamento, rifiuto dell'MP3, esportazione WAV con la catena FLAT
+    {
+        const double sr = 44100.0;
+        auto in = makeSignal (sr, 2.0, 11);
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+        const auto src = dir.getChildFile ("asf_test_in.wav");
+        const auto dst = dir.getChildFile ("asf_test_out.wav");
+        check (writeWav (src, in, sr), "scrittura WAV di prova");
+
+        asf::FilePlayer player;
+        juce::String err;
+        const bool loadedOk = player.load (src, err);
+        const double durationS = player.getLength();
+        check (loadedOk && std::abs (durationS - 2.0) < 0.01, "FilePlayer carica il WAV (durata " + juce::String (durationS, 3) + " s)");
+
+        auto mp3 = dir.getChildFile ("asf_test.mp3");
+        mp3.replaceWithText ("x");
+        juce::String err2;
+        check (! player.load (mp3, err2) && err2.contains ("WAV"), "MP3 rifiutato con messaggio chiaro");
+
+        FixerProcessor fp; fp.setCurrentProgram (6);
+        setParam (fp, "limit", 0.0f); setParam (fp, "lowcut", 10.0f);
+        juce::MemoryBlock st; fp.getStateInformation (st);
+        const auto e = asf::Exporter::render (src, dst, st);
+        check (e.isEmpty(), "esportazione WAV completata" + (e.isEmpty() ? juce::String() : " (" + e + ")"));
+        if (e.isEmpty())
+        {
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> r (fm.createReaderFor (dst));
+            const bool sameLen = r != nullptr && r->lengthInSamples == in.getNumSamples() && r->numChannels == 2;
+            check (sameLen, "stessa durata e canali dell'originale");
+            if (r != nullptr)
+            {
+                juce::AudioBuffer<float> out (2, (int) r->lengthInSamples);
+                r->read (&out, 0, (int) r->lengthInSamples, 0, true, true);
+                // confronto con il sorgente così come il file lo contiene (la quantizzazione a 24 bit è nel file)
+                juce::AudioFormatManager fm2; fm2.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> rs (fm2.createReaderFor (src));
+                juce::AudioBuffer<float> q ((int) rs->numChannels, (int) rs->lengthInSamples);
+                rs->read (&q, 0, (int) rs->lengthInSamples, 0, true, true);
+                asf::Biquad hq; hq.setHighPass (sr, 10.0);
+                double eq = 0, rq = 0;
+                for (int i = 0; i < in.getNumSamples(); ++i)
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        const double w = hq.run (q.getSample (c, i), c);
+                        eq += (out.getSample (c, i) - w) * (out.getSample (c, i) - w);
+                        rq += w * w;
+                    }
+                const double db = 10.0 * std::log10 (eq / rq + 1e-30);
+                check (db < -100.0, "file esportato allineato al sorgente (errore " + juce::String (db, 1) + " dB)");
+            }
+        }
+        dst.deleteFile();
+        src.deleteFile();
+        mp3.deleteFile();
     }
 
     // CPU: 60 s di audio a 48 kHz, blocchi da 512

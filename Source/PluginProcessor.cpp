@@ -76,11 +76,12 @@ bool FixerProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     return layouts.getMainInputChannelSet() == out;
 }
 
-void FixerProcessor::prepareToPlay (double sampleRate, int)
+void FixerProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     sr = sampleRate;
     preparedRate.store (sampleRate);
     cleaner.prepare (sampleRate);
+    filePlayer.prepare (sampleRate, samplesPerBlock);
     limiter.prepare (sampleRate);
     dryMeter.prepare (sampleRate);
     wetMeter.prepare (sampleRate);
@@ -111,6 +112,13 @@ void FixerProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     const int total = buffer.getNumSamples();
     if (numCh == 0 || total == 0) return;
     for (int c = numCh; c < buffer.getNumChannels(); ++c) buffer.clear (c, 0, total);
+
+    // Standalone con un brano caricato: il file prende il posto dell'ingresso audio
+    if (juce::JUCEApplicationBase::isStandaloneApp() && filePlayer.isLoaded())
+    {
+        buffer.clear();
+        filePlayer.render (buffer);
+    }
 
     asf::CleanSettings s;
     s.mud = p ("mud"); s.harsh = p ("harsh"); s.sens = p ("sens"); s.fizz = p ("fizz");
@@ -257,6 +265,6 @@ void FixerProcessor::setStateInformation (const void* data, int size)
         }
 }
 
-juce::AudioProcessorEditor* FixerProcessor::createEditor() { return new FixerEditor (*this); }
+juce::AudioProcessorEditor* FixerProcessor::createEditor() { return new FixerEditor (*this, juce::JUCEApplicationBase::isStandaloneApp()); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new FixerProcessor(); }

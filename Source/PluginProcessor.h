@@ -3,6 +3,7 @@
 #include "Dsp/SpectralCleaner.h"
 #include "Dsp/Loudness.h"
 #include "Dsp/Limiter.h"
+#include "FilePlayer.h"
 
 namespace asf
 {
@@ -98,6 +99,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     asf::SpectralCleaner cleaner;
+    asf::FilePlayer filePlayer;                // solo Standalone: il brano caricato sostituisce l'ingresso
 
     // misure per l'interfaccia
     std::atomic<float> inPeak { 0 }, outPeak { 0 }, lufsIn { -70 }, lufsOut { -70 }, limiterGrDb { 0 }, fairGainDb { 0 };

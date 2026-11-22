@@ -59,6 +59,7 @@ target_sources(MBStudio91AISongFixer PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/SpectrumView.cpp
+    Source/FilePlayer.cpp
     Source/Dsp/SpectralCleaner.cpp)
 
 target_compile_definitions(MBStudio91AISongFixer PUBLIC
@@ -83,7 +84,7 @@ option(FIXER_TESTS "Compila i test offline" ON)
 if(FIXER_TESTS)
     juce_add_console_app(FixerTests PRODUCT_NAME "FixerTests")
     target_sources(FixerTests PRIVATE tests/OfflineTest.cpp
-        Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/SpectrumView.cpp Source/Dsp/SpectralCleaner.cpp)
+        Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/SpectrumView.cpp Source/FilePlayer.cpp Source/Dsp/SpectralCleaner.cpp)
     target_include_directories(FixerTests PRIVATE Source)
     mbstudio_ui_add(FixerTests)
     target_compile_definitions(FixerTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)

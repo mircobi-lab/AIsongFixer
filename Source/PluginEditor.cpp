@@ -36,8 +36,8 @@ void Knob::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-FixerEditor::FixerEditor (FixerProcessor& p)
-    : AudioProcessorEditor (p), proc (p), spectrum (p.cleaner),
+FixerEditor::FixerEditor (FixerProcessor& p, bool enabled)
+    : AudioProcessorEditor (p), proc (p), playerEnabled (enabled), spectrum (p.cleaner),
       mud      (p.apvts, "mud",      "MUD",       "Toglie il fango sui medio-bassi (120-600 Hz): risonanze e accumulo"),
       harsh    (p.apvts, "harsh",    "HARSH",     "Abbassa le risonanze aspre tra 1 e 12 kHz, solo dove sporgono"),
       sens     (p.apvts, "sens",     "SENS",      "Sensibilita' di MUD e HARSH: piu' alta = interviene su picchi piu' piccoli"),
@@ -52,7 +52,8 @@ FixerEditor::FixerEditor (FixerProcessor& p)
       input    (p.apvts, "input",    "INPUT",     "Guadagno in ingresso"),
       output   (p.apvts, "output",   "OUTPUT",    "Guadagno in uscita, prima del limiter"),
       mix      (p.apvts, "mix",      "MIX",       "Miscela tra originale e pulito"),
-      ceiling  (p.apvts, "ceiling",  "CEILING",   "Tetto del limiter (picco campione)")
+      ceiling  (p.apvts, "ceiling",  "CEILING",   "Tetto del limiter (picco campione)"),
+      wave (p.filePlayer)
 {
     setLookAndFeel (&lnf);
 
@@ -84,11 +85,134 @@ FixerEditor::FixerEditor (FixerProcessor& p)
     setupToggle (deltaBtn, "delta", "ffffb020", "Ascolta solo quello che viene tolto", deltaAtt);
     setupToggle (limitBtn, "limit", "ff3ee05c", "Limiter di uscita", limitAtt);
 
-    setSize (1000, 660);
+    if (playerEnabled)
+    {
+        addAndMakeVisible (wave);
+        addAndMakeVisible (loadBtn);
+        addAndMakeVisible (playBtn);
+        addAndMakeVisible (loopBtn);
+        addAndMakeVisible (exportBtn);
+        addAndMakeVisible (status);
+
+        loadBtn.setTooltip ("Apri un brano (WAV, AIFF, FLAC, OGG). Puoi anche trascinarlo nella finestra");
+        loadBtn.onClick = [this] { chooseFile(); };
+        playBtn.setTooltip ("Ascolta il brano pulito. Con A/B senti l'originale");
+        playBtn.onClick = [this] { if (proc.filePlayer.isPlaying()) proc.filePlayer.stop(); else proc.filePlayer.play(); };
+        loopBtn.setClickingTogglesState (true);
+        loopBtn.setToggleState (true, juce::dontSendNotification);
+        loopBtn.getProperties().set ("ledColour", "ff3ee05c");
+        loopBtn.setTooltip ("Ripete il brano alla fine");
+        loopBtn.onClick = [this] { proc.filePlayer.setLooping (loopBtn.getToggleState()); };
+        exportBtn.setTooltip ("Esporta il brano pulito in WAV a 24 bit, alla stessa frequenza del file");
+        exportBtn.onClick = [this] { exportFile(); };
+        exportBtn.setEnabled (false);
+        status.setText (proc.filePlayer.isLoaded() ? "CARICATO: " + proc.filePlayer.getFile().getFileName()
+                                                   : juce::String ("TRASCINA UN BRANO QUI, O PREMI LOAD"), juce::dontSendNotification);
+        status.setColour (juce::Label::textColourId, C::printDim);
+        status.setJustificationType (juce::Justification::centredLeft);
+
+        setSize (1000, 744);
+    }
+    else
+    {
+        setSize (1000, 660);
+    }
     startTimerHz (20);
 }
 
-FixerEditor::~FixerEditor() { setLookAndFeel (nullptr); }
+FixerEditor::~FixerEditor()
+{
+    chooser.reset();
+    setLookAndFeel (nullptr);
+}
+
+//==============================================================================
+void WaveView::seek (const juce::MouseEvent& e)
+{
+    if (! player.isLoaded()) return;
+    const float frac = juce::jlimit (0.0f, 1.0f, (float) e.x / (float) juce::jmax (1, getWidth()));
+    player.setPosition ((double) frac * player.getLength());
+}
+
+void WaveView::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat();
+    ui::paintRecess (g, r);
+    const auto in = r.reduced (6.f, 6.f);
+    const auto& ov = player.getOverview();
+    if (! player.isLoaded() || ov.empty())
+    {
+        ui::paintPrinted (g, in, "NESSUN BRANO CARICATO", 12.f, juce::Justification::centred, C::printDim);
+        return;
+    }
+    const double len = player.getLength();
+    const float playX = in.getX() + in.getWidth() * (len > 0.0 ? (float) (player.getPosition() / len) : 0.0f);
+    const float cy = in.getCentreY(), w = in.getWidth() / (float) ov.size();
+    for (size_t i = 0; i < ov.size(); ++i)
+    {
+        const float x = in.getX() + (float) i * w;
+        const float amp = juce::jmax (1.0f, ov[i] * in.getHeight() * 0.5f);
+        g.setColour (x < playX ? C::print.withAlpha (.85f) : C::printDim.withAlpha (.45f));
+        g.fillRect (x, cy - amp, juce::jmax (1.0f, w * .8f), amp * 2.0f);
+    }
+    g.setColour (C::ledGreen);
+    g.fillRect (playX - 1.0f, in.getY(), 2.0f, in.getHeight());
+}
+
+bool FixerEditor::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    if (! playerEnabled) return false;
+    for (auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg")) return true;
+    return false;
+}
+
+void FixerEditor::filesDropped (const juce::StringArray& files, int, int)
+{
+    for (auto& f : files)
+    {
+        juce::File file (f);
+        if (file.hasFileExtension ("wav;aif;aiff;flac;ogg")) { loadFile (file); return; }
+    }
+}
+
+void FixerEditor::loadFile (const juce::File& f)
+{
+    juce::String err;
+    if (proc.filePlayer.load (f, err))
+        status.setText ("CARICATO: " + f.getFileName(), juce::dontSendNotification);
+    else
+        status.setText (err, juce::dontSendNotification);
+}
+
+void FixerEditor::chooseFile()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Apri un brano", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              const auto f = fc.getResult();
+                              if (f.existsAsFile()) loadFile (f);
+                          });
+}
+
+void FixerEditor::exportFile()
+{
+    if (! proc.filePlayer.isLoaded() || exporter.isBusy()) return;
+    const auto src = proc.filePlayer.getFile();
+    const auto suggested = src.getSiblingFile (src.getFileNameWithoutExtension() + " - AI Song Fixer.wav");
+    chooser = std::make_unique<juce::FileChooser> ("Salva il brano pulito", suggested, "*.wav");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                          | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this, src] (const juce::FileChooser& fc)
+                          {
+                              const auto dest = fc.getResult();
+                              if (dest == juce::File()) return;
+                              juce::MemoryBlock state;
+                              proc.getStateInformation (state);
+                              exporter.start (src, dest.withFileExtension ("wav"), state);
+                          });
+}
 
 void FixerEditor::timerCallback()
 {
@@ -98,6 +222,21 @@ void FixerEditor::timerCallback()
 
     shownLufsIn = proc.lufsIn.load(); shownLufsOut = proc.lufsOut.load();
     shownFair = proc.fairGainDb.load(); shownGr = proc.limiterGrDb.load();
+    if (playerEnabled)
+    {
+        playBtn.setButtonText (proc.filePlayer.isPlaying() ? "STOP" : "PLAY");
+        exportBtn.setEnabled (proc.filePlayer.isLoaded() && ! exporter.isBusy());
+        wave.repaint();
+        if (exporter.isBusy())
+            status.setText ("ESPORTAZIONE " + juce::String (juce::roundToInt (exporter.getProgress() * 100.0f)) + " %", juce::dontSendNotification);
+        switch (exporter.takeResult())
+        {
+            case asf::Exporter::Result::done:      status.setText ("SALVATO: " + exporter.getDestination().getFileName(), juce::dontSendNotification); break;
+            case asf::Exporter::Result::failed:    status.setText ("ERRORE: " + exporter.getMessage(), juce::dontSendNotification); break;
+            case asf::Exporter::Result::cancelled: status.setText ("ESPORTAZIONE ANNULLATA", juce::dontSendNotification); break;
+            case asf::Exporter::Result::none:      break;
+        }
+    }
     if (presets.getSelectedId() != proc.getCurrentProgram() + 1)
         presets.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
     repaint (lufsArea);
@@ -207,4 +346,18 @@ void FixerEditor::resized()
     }
 
     footerArea = getLocalBounds().reduced (18, 0).removeFromBottom (40).withTrimmedBottom (8);
+
+    if (playerEnabled)
+    {
+        transportArea = getLocalBounds().reduced (18, 0).withY (getHeight() - 124).withHeight (72);
+        auto t = transportArea;
+        auto top = t.removeFromTop (30);
+        loadBtn.setBounds (top.removeFromLeft (80)); top.removeFromLeft (6);
+        playBtn.setBounds (top.removeFromLeft (80)); top.removeFromLeft (6);
+        loopBtn.setBounds (top.removeFromLeft (70)); top.removeFromLeft (12);
+        exportBtn.setBounds (top.removeFromRight (130)); top.removeFromRight (12);
+        status.setBounds (top);
+        t.removeFromTop (6);
+        wave.setBounds (t);
+    }
 }

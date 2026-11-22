@@ -33,6 +33,17 @@ Tasti in alto:
 
 Il display mostra lo spettro in ingresso (grigio), in uscita (bianco) e quanto viene tolto per banda (ambra, in alto). A destra ci sono meter IN/OUT, la riduzione del limiter e le letture LUFS-S dell'originale e del pulito.
 
+## Standalone: lettore e export
+
+Nello Standalone (non nel plugin dentro Ableton) c'è un lettore in basso:
+
+- **LOAD** apre un brano, oppure trascinalo nella finestra. Accetta WAV, AIFF, FLAC e OGG.
+- **PLAY / STOP** e **LOOP**. Clic o trascinamento sulla forma d'onda per cambiare punto.
+- **A/B, FAIR, DELTA** funzionano anche sul brano caricato: il file prende il posto dell'ingresso e passa per tutta la catena.
+- **EXPORT WAV** salva il brano pulito in WAV a 24 bit, alla stessa frequenza del file, con la catena e i valori che vedi a schermo. Esporta da solo in background, con l'avanzamento in percentuale.
+
+Gli MP3 non si leggono ancora: su Suno scarica il brano in WAV. (L'MP3 richiede un'opzione di JUCE con avvertenze di licenza, la attiviamo solo se ti serve davvero.)
+
 ## Preset
 
 SUNO FULL MIX (predefinito), SUNO GENTLE, SUNO STRONG, UDIO, VOCAL STEM, INSTRUMENTAL STEM, FLAT (tutto spento, utile per partire da zero).
@@ -69,6 +80,7 @@ Ogni build su Linux esegue i test offline (`tests/OfflineTest.cpp`) e pluginval 
 - il limiter tiene il picco a -1,00 dBFS con +9 dB in ingresso;
 - con A/B e FAIR l'originale esce entro 0,2 LU dalla loudness del pulito;
 - nessun NaN con blocchi di 1, 17, 64, 333 e 1000 campioni;
+- export WAV: il file esportato coincide con il sorgente elaborato dalla stessa catena (errore sotto -100 dB), stessa durata e canali;
 - CPU: circa il 2% di un core.
 
 Il segnale di prova è sintetico. Su un brano Suno vero conviene partire da SUNO GENTLE, ascoltare in DELTA e salire piano.
