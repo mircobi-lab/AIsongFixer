@@ -63,13 +63,22 @@ FixerEditor::FixerEditor (FixerProcessor& p, bool enabled)
     for (auto* m : { &inMeter, &outMeter, &grMeter })
         addAndMakeVisible (m);
 
-    const auto& list = asf::factoryPresets();
-    for (int i = 0; i < (int) list.size(); ++i)
-        presets.addItem (list[(size_t) i].name, i + 1);
-    presets.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
-    presets.setTooltip ("Preset di partenza");
-    presets.onChange = [this] { if (presets.getSelectedId() > 0) proc.setCurrentProgram (presets.getSelectedId() - 1); };
+    presets.setTooltip ("Preset: quelli di fabbrica in alto, il tuo banco PERSONAL in fondo");
+    presets.onChange = [this]
+    {
+        const int id = presets.getSelectedId();
+        if (id >= userIdBase)     proc.loadUserPreset (id - userIdBase);
+        else if (id > 0)          proc.setCurrentProgram (id - 1);
+    };
     addAndMakeVisible (presets);
+    rebuildPresetMenu();
+
+    saveBtn.setTooltip ("Salva le impostazioni attuali nel banco PERSONAL, con un nome");
+    saveBtn.onClick = [this] { savePreset(); };
+    delBtn.setTooltip ("Elimina il preset PERSONAL selezionato");
+    delBtn.onClick = [this] { deletePreset(); };
+    addAndMakeVisible (saveBtn);
+    addAndMakeVisible (delBtn);
 
     auto setupToggle = [this] (juce::TextButton& b, const char* id, const char* led, const juce::String& tip,
                                std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>& a)
@@ -111,11 +120,11 @@ FixerEditor::FixerEditor (FixerProcessor& p, bool enabled)
         status.setColour (juce::Label::textColourId, C::printDim);
         status.setJustificationType (juce::Justification::centredLeft);
 
-        setSize (1000, 744);
+        setSize (1100, 744);
     }
     else
     {
-        setSize (1000, 660);
+        setSize (1100, 660);
     }
     startTimerHz (20);
 }
@@ -174,6 +183,82 @@ void FixerEditor::filesDropped (const juce::StringArray& files, int, int)
         juce::File file (f);
         if (file.hasFileExtension ("wav;aif;aiff;flac;ogg")) { loadFile (file); return; }
     }
+}
+
+void FixerEditor::rebuildPresetMenu()
+{
+    presets.clear (juce::dontSendNotification);
+    const auto& list = asf::factoryPresets();
+    for (int i = 0; i < (int) list.size(); ++i)
+        presets.addItem (list[(size_t) i].name, i + 1);
+
+    presets.addSectionHeading ("PERSONAL");
+    const auto& user = proc.getUserPresets();
+    if (user.empty())
+    {
+        presets.addItem ("NESSUN PRESET: PREMI SAVE", userIdBase - 1);
+        presets.setItemEnabled (userIdBase - 1, false);
+    }
+    for (int i = 0; i < (int) user.size(); ++i)
+        presets.addItem (user[(size_t) i].name, userIdBase + i);
+
+    syncPresetSelection();
+}
+
+void FixerEditor::syncPresetSelection()
+{
+    const int u = proc.getCurrentUserPreset();
+    const int wanted = u >= 0 ? userIdBase + u : proc.getCurrentProgram() + 1;
+    if (presets.getSelectedId() != wanted)
+        presets.setSelectedId (wanted, juce::dontSendNotification);
+}
+
+void FixerEditor::savePreset()
+{
+    // il nome proposto è quello del preset selezionato, così SAVE lo aggiorna
+    const int cur = proc.getCurrentUserPreset();
+    const juce::String suggested = cur >= 0 ? proc.getUserPresets()[(size_t) cur].name : juce::String ("Il mio preset");
+
+    auto* aw = new juce::AlertWindow ("Salva nel banco PERSONAL",
+                                      "Scegli il nome. Se esiste già un preset con lo stesso nome, viene sostituito.",
+                                      juce::MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("name", suggested, "Nome:");
+    aw->addButton ("SALVA", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("ANNULLA", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<FixerEditor> safe (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([safe, aw] (int result)
+    {
+        if (safe == nullptr || result != 1) return;
+        juce::String error;
+        if (! safe->proc.saveUserPreset (aw->getTextEditorContents ("name"), error))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Preset", error);
+            return;
+        }
+        safe->rebuildPresetMenu();
+    }), true);
+}
+
+void FixerEditor::deletePreset()
+{
+    const int idx = proc.getCurrentUserPreset();
+    if (idx < 0)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Preset",
+                                                "Seleziona un preset del banco PERSONAL da eliminare.");
+        return;
+    }
+    const auto name = proc.getUserPresets()[(size_t) idx].name;
+    juce::Component::SafePointer<FixerEditor> safe (this);
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, "Elimina preset",
+                                        "Eliminare \"" + name + "\" dal banco PERSONAL? Non si può annullare.",
+                                        "ELIMINA", "ANNULLA", this,
+                                        juce::ModalCallbackFunction::create ([safe, idx] (int result)
+    {
+        if (safe == nullptr || result != 1) return;
+        if (safe->proc.deleteUserPreset (idx)) safe->rebuildPresetMenu();
+    }));
 }
 
 void FixerEditor::loadFile (const juce::File& f)
@@ -237,8 +322,7 @@ void FixerEditor::timerCallback()
             case asf::Exporter::Result::none:      break;
         }
     }
-    if (presets.getSelectedId() != proc.getCurrentProgram() + 1)
-        presets.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
+    syncPresetSelection();
     repaint (lufsArea);
 }
 
@@ -303,6 +387,8 @@ void FixerEditor::resized()
         deltaBtn.setBounds (h.removeFromRight (82)); h.removeFromRight (6);
         fairBtn.setBounds (h.removeFromRight (74)); h.removeFromRight (6);
         abBtn.setBounds (h.removeFromRight (80)); h.removeFromRight (14);
+        delBtn.setBounds (h.removeFromRight (46)); h.removeFromRight (4);
+        saveBtn.setBounds (h.removeFromRight (56)); h.removeFromRight (6);
         presets.setBounds (h.removeFromRight (170).reduced (0, 3));
     }
 

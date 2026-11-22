@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include <algorithm>
 #include "PluginEditor.h"
 
 namespace asf
@@ -20,6 +21,36 @@ const std::vector<Preset>& factoryPresets()
 }
 
 using APVTS = juce::AudioProcessorValueTreeState;
+
+//==============================================================================
+// Banco Personal
+namespace
+{
+    // parametri salvati in un preset: pulizia e tono (come i preset di fabbrica)
+    constexpr const char* const presetParamIds[] { "mud", "harsh", "sens", "fizz", "fizzfreq", "deess",
+                                                   "vocal", "air", "bassmono", "warmth", "lowcut" };
+    constexpr const char* const presetTag = "AISONGFIXER_PRESET";
+
+    juce::File defaultPresetDir()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+            .getChildFile ("MBStudio91").getChildFile ("AI Song Fixer").getChildFile ("Presets");
+    }
+
+    // solo lettere, cifre, spazi, trattino e underscore: il nome diventa anche il nome del file
+    juce::String cleanPresetName (const juce::String& raw)
+    {
+        juce::String out;
+        for (auto ch : raw.trim())
+        {
+            if (juce::CharacterFunctions::isLetterOrDigit (ch) || ch == ' ' || ch == '-' || ch == '_')
+                out += juce::String::charToString (ch);
+            else if (out.isNotEmpty() && ! out.endsWith ("_"))
+                out += "_";
+        }
+        return out.trim().substring (0, 40);
+    }
+}
 
 APVTS::ParameterLayout FixerProcessor::createLayout()
 {
@@ -67,6 +98,8 @@ FixerProcessor::FixerProcessor()
                                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "AISONGFIXER", createLayout())
 {
+    presetDir = defaultPresetDir();
+    refreshUserPresets();
 }
 
 bool FixerProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -231,20 +264,91 @@ const juce::String FixerProcessor::getProgramName (int i)
     return juce::isPositiveAndBelow (i, (int) l.size()) ? juce::String (l[(size_t) i].name) : juce::String();
 }
 
+void FixerProcessor::setParamValue (const char* id, float value)
+{
+    if (auto* prm = apvts.getParameter (id))
+        prm->setValueNotifyingHost (prm->convertTo0to1 (value));
+}
+
 void FixerProcessor::setCurrentProgram (int i)
 {
     const auto& l = asf::factoryPresets();
     if (! juce::isPositiveAndBelow (i, (int) l.size())) return;
     currentProgram = i;
+    currentUser = -1;
     const auto& pr = l[(size_t) i];
-    auto set = [this] (const char* id, float v)
+    setParamValue ("mud", pr.mud); setParamValue ("harsh", pr.harsh); setParamValue ("sens", pr.sens);
+    setParamValue ("fizz", pr.fizz); setParamValue ("fizzfreq", pr.fizzFreq); setParamValue ("deess", pr.deess);
+    setParamValue ("vocal", pr.vocal); setParamValue ("air", pr.air); setParamValue ("bassmono", pr.bassMono);
+    setParamValue ("warmth", pr.warmth); setParamValue ("lowcut", pr.lowCut);
+}
+
+void FixerProcessor::refreshUserPresets()
+{
+    const auto oldFile = (currentUser >= 0 && currentUser < (int) userPresets.size()) ? userPresets[(size_t) currentUser].file : juce::File();
+    userPresets.clear();
+    for (const auto& f : presetDir.findChildFiles (juce::File::findFiles, false, "*.xml"))
+        userPresets.push_back ({ f.getFileNameWithoutExtension(), f });
+    std::sort (userPresets.begin(), userPresets.end(),
+               [] (const UserPreset& a, const UserPreset& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+
+    currentUser = -1;
+    for (int i = 0; i < (int) userPresets.size(); ++i)
+        if (oldFile != juce::File() && userPresets[(size_t) i].file == oldFile) currentUser = i;
+}
+
+bool FixerProcessor::saveUserPreset (const juce::String& requestedName, juce::String& error)
+{
+    const auto name = cleanPresetName (requestedName);
+    if (name.isEmpty())
     {
-        if (auto* prm = apvts.getParameter (id))
-            prm->setValueNotifyingHost (prm->convertTo0to1 (v));
-    };
-    set ("mud", pr.mud); set ("harsh", pr.harsh); set ("sens", pr.sens); set ("fizz", pr.fizz);
-    set ("fizzfreq", pr.fizzFreq); set ("deess", pr.deess); set ("vocal", pr.vocal); set ("air", pr.air);
-    set ("bassmono", pr.bassMono); set ("warmth", pr.warmth); set ("lowcut", pr.lowCut);
+        error = "Scrivi un nome per il preset (lettere, numeri, spazi)";
+        return false;
+    }
+    if (! presetDir.createDirectory())
+    {
+        error = "Impossibile creare la cartella dei preset: " + presetDir.getFullPathName();
+        return false;
+    }
+
+    juce::XmlElement x (presetTag);
+    x.setAttribute ("version", 1);
+    x.setAttribute ("name", name);
+    for (auto* id : presetParamIds)
+        x.setAttribute (id, (double) p (id));
+
+    const auto file = presetDir.getChildFile (name + ".xml");
+    if (! x.writeTo (file))
+    {
+        error = "Impossibile scrivere " + file.getFileName();
+        return false;
+    }
+    refreshUserPresets();
+    for (int i = 0; i < (int) userPresets.size(); ++i)
+        if (userPresets[(size_t) i].file == file) currentUser = i;
+    return true;
+}
+
+bool FixerProcessor::loadUserPreset (int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) userPresets.size())) return false;
+    std::unique_ptr<juce::XmlElement> x (juce::XmlDocument::parse (userPresets[(size_t) index].file));
+    if (x == nullptr || ! x->hasTagName (presetTag)) return false;
+
+    for (auto* id : presetParamIds)
+        if (x->hasAttribute (id))
+            setParamValue (id, (float) x->getDoubleAttribute (id));
+    currentUser = index;
+    return true;
+}
+
+bool FixerProcessor::deleteUserPreset (int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) userPresets.size())) return false;
+    if (! userPresets[(size_t) index].file.deleteFile()) return false;
+    currentUser = -1;
+    refreshUserPresets();
+    return true;
 }
 
 void FixerProcessor::getStateInformation (juce::MemoryBlock& dest)

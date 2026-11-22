@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <vector>
 #include "Dsp/SpectralCleaner.h"
 #include "Dsp/Loudness.h"
 #include "Dsp/Limiter.h"
@@ -89,6 +90,17 @@ public:
     int getNumPrograms() override;
     int getCurrentProgram() override { return currentProgram; }
     void setCurrentProgram (int) override;
+
+    // banco Personal: preset salvati dall'utente come file XML in una cartella dell'account
+    struct UserPreset { juce::String name; juce::File file; };
+    const std::vector<UserPreset>& getUserPresets() const noexcept { return userPresets; }
+    int getCurrentUserPreset() const noexcept { return currentUser; }   // -1 se è selezionato un preset di fabbrica
+    bool saveUserPreset (const juce::String& name, juce::String& error);  // sostituisce un preset con lo stesso nome
+    bool loadUserPreset (int index);
+    bool deleteUserPreset (int index);
+    void setUserPresetDir (const juce::File& dir) { presetDir = dir; refreshUserPresets(); }
+    juce::File getUserPresetDir() const { return presetDir; }
+    void setParamValue (const char* id, float value);
     const juce::String getProgramName (int) override;
     void changeProgramName (int, const juce::String&) override {}
 
@@ -119,6 +131,10 @@ private:
     juce::SmoothedValue<float> inGain, outGain, mix, bypassMix, fairLin;
     juce::AudioBuffer<float> raw, pre, preD, rawD, work;
     int currentProgram = 0;
+    int currentUser = -1;
+    std::vector<UserPreset> userPresets;
+    juce::File presetDir;
+    void refreshUserPresets();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FixerProcessor)
 };

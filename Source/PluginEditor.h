@@ -46,6 +46,13 @@ private:
     void timerCallback() override;
     void sectionTitle (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title);
     void loadFile (const juce::File&);
+    void rebuildPresetMenu();
+    void syncPresetSelection();
+    void savePreset();
+    void deletePreset();
+
+    // id del menu: 1..N preset di fabbrica, userIdBase+i preset del banco Personal
+    static constexpr int userIdBase = 1000;
     void chooseFile();
     void exportFile();
 
@@ -57,6 +64,7 @@ private:
     SpectrumView spectrum;
     juce::ComboBox presets;
     juce::TextButton abBtn { "A/B" }, fairBtn { "FAIR" }, deltaBtn { "DELTA" }, limitBtn { "LIMIT" };
+    juce::TextButton saveBtn { "SAVE" }, delBtn { "DEL" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> abAtt, fairAtt, deltaAtt, limitAtt;
 
     Knob mud, harsh, sens, fizz, fizzFreq, deess, vocal, air, warmth, bassMono, lowCut, input, output, mix, ceiling;

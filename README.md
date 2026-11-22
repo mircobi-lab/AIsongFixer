@@ -48,6 +48,16 @@ Gli MP3 non si leggono ancora: su Suno scarica il brano in WAV. (L'MP3 richiede 
 
 SUNO FULL MIX (predefinito), SUNO GENTLE, SUNO STRONG, UDIO, VOCAL STEM, INSTRUMENTAL STEM, FLAT (tutto spento, utile per partire da zero).
 
+### Banco PERSONAL
+
+Nel menu dei preset, in fondo, c'è la sezione PERSONAL. Premi **SAVE** per salvare le impostazioni attuali con un nome: se un preset ha già quel nome, viene sostituito. **DEL** elimina il preset personale selezionato, dopo conferma.
+
+I preset personali sono file XML in una cartella del tuo account, separata dal plugin:
+- Mac: `~/Library/Application Support/MBStudio91/AI Song Fixer/Presets`
+- Windows e Linux: nella cartella dati utente equivalente.
+
+Si possono copiare su un altro computer. Il banco salva i parametri di pulizia e di tono (non la latenza né il limiter).
+
 ## Cosa non può fare
 
 Pulisce e lucida, non rigenera. Non ricostruisce dettagli che l'AI non ha generato, non corregge voci che "ondeggiano", note sbagliate o parole mangiate. Per quelle conviene rigenerare o editare la parte in Suno prima.

@@ -290,6 +290,36 @@ int main (int argc, char** argv)
         mp3.deleteFile();
     }
 
+    // 8) banco Personal: salvataggio, caricamento, nome vuoto, eliminazione (cartella temporanea)
+    {
+        FixerProcessor fp;
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("asf_presets_test");
+        dir.deleteRecursively();
+        fp.setUserPresetDir (dir);
+        check (fp.getUserPresets().empty(), "banco Personal vuoto all'inizio");
+
+        fp.setCurrentProgram (3);
+        setParam (fp, "mud", 0.77f);
+        setParam (fp, "fizzfreq", 9000.0f);
+        juce::String err;
+        check (fp.saveUserPreset ("Mio Suno 1", err) && fp.getUserPresets().size() == 1, "preset personale salvato");
+        check (fp.getCurrentUserPreset() == 0, "il preset salvato diventa quello selezionato");
+
+        fp.setCurrentProgram (0);
+        check (fp.getCurrentUserPreset() == -1, "scegliere un preset di fabbrica deseleziona quello personale");
+        setParam (fp, "mud", 0.0f);
+        check (fp.loadUserPreset (0), "preset personale caricato");
+        check (std::abs (fp.apvts.getRawParameterValue ("mud")->load() - 0.77f) < 0.001f
+               && std::abs (fp.apvts.getRawParameterValue ("fizzfreq")->load() - 9000.0f) < 1.0f,
+               "valori del preset ripristinati dal file");
+
+        juce::String err2;
+        check (! fp.saveUserPreset ("   ", err2) && err2.isNotEmpty(), "nome vuoto rifiutato con messaggio");
+        check (fp.deleteUserPreset (0) && fp.getUserPresets().empty() && ! dir.getChildFile ("Mio Suno 1.xml").existsAsFile(),
+               "preset eliminato anche dal disco");
+        dir.deleteRecursively();
+    }
+
     // CPU: 60 s di audio a 48 kHz, blocchi da 512
     {
         FixerProcessor p; p.setCurrentProgram (0); p.prepareToPlay (48000, 512);
