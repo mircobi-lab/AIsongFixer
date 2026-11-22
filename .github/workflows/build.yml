@@ -1,0 +1,119 @@
+name: Build MBStudio91 AI Song Fixer
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    name: "macOS universale (Intel + Apple Silicon)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -G Xcode -DFIXER_TESTS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build
+        run: cmake --build build --config Release --parallel 3
+      - name: Ad-hoc codesign
+        run: |
+          cd "build/MBStudio91AISongFixer_artefacts/Release"
+          for b in "VST3/MBStudio91 AI Song Fixer.vst3" "AU/MBStudio91 AI Song Fixer.component" "Standalone/MBStudio91 AI Song Fixer.app"; do
+            codesign --force --deep --sign - "$b"
+            codesign --verify --verbose=2 "$b"
+          done
+      - name: Package
+        run: |
+          cd "build/MBStudio91AISongFixer_artefacts/Release"
+          ditto -c -k --keepParent "VST3/MBStudio91 AI Song Fixer.vst3" "AISongFixer-macOS-VST3.zip"
+          ditto -c -k --keepParent "AU/MBStudio91 AI Song Fixer.component" "AISongFixer-macOS-AU.zip"
+          ditto -c -k --keepParent "Standalone/MBStudio91 AI Song Fixer.app" "AISongFixer-macOS-Standalone.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AISongFixer-macOS
+          path: build/MBStudio91AISongFixer_artefacts/Release/*.zip
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -A x64 -DFIXER_TESTS=OFF
+      - name: Build
+        run: cmake --build build --config Release --parallel 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AISongFixer-Windows
+          path: |
+            build/MBStudio91AISongFixer_artefacts/Release/VST3/
+            build/MBStudio91AISongFixer_artefacts/Release/Standalone/
+
+  linux:
+    name: "Linux (x64) + test + pluginval"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dipendenze
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev xvfb
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 3
+      - name: Test offline
+        run: ./build/FixerTests_artefacts/Release/FixerTests
+      - name: pluginval (strictness 10)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 "build/MBStudio91AISongFixer_artefacts/Release/VST3/MBStudio91 AI Song Fixer.vst3"
+      - name: Screenshot interfaccia
+        run: xvfb-run -a ./build/FixerTests_artefacts/Release/FixerTests --snapshot screenshot.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AISongFixer-Linux
+          path: |
+            build/MBStudio91AISongFixer_artefacts/Release/VST3/
+            build/MBStudio91AISongFixer_artefacts/Release/Standalone/
+            screenshot.png
+
+  # a ogni aggiornamento di main (e per i tag v*) i file pronti vanno nella pagina Releases
+  release:
+    name: "Pubblica in Releases"
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    needs: [mac, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Zip Windows e Linux
+        run: |
+          cd dist
+          (cd AISongFixer-Windows && zip -r ../AISongFixer-Windows.zip .)
+          (cd AISongFixer-Linux && zip -r ../AISongFixer-Linux.zip . -x screenshot.png)
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('MBStudio91 AI Song Fixer {0}', github.ref_name) || format('MBStudio91 AI Song Fixer 1.0.{0}', github.run_number) }}
+          body: |
+            Compilato automaticamente da GitHub dal commit ${{ github.sha }}.
+            - Mac (Apple Silicon e Intel): AISongFixer-macOS-VST3.zip, -AU.zip, -Standalone.zip.
+              Dopo la copia: xattr -dr com.apple.quarantine sul plugin e sull'app.
+            - Windows: AISongFixer-Windows.zip (cartella VST3 e app).
+            - Linux: AISongFixer-Linux.zip.
+          files: |
+            dist/AISongFixer-macOS/*.zip
+            dist/AISongFixer-Windows.zip
+            dist/AISongFixer-Linux.zip
