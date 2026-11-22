@@ -82,6 +82,7 @@ jobs:
           path: |
             build/MBStudio91AISongFixer_artefacts/Release/VST3/
             build/MBStudio91AISongFixer_artefacts/Release/Standalone/
+            assets/icon-1024.png
             screenshot.png
 
   # a ogni aggiornamento di main (e per i tag v*) i file pronti vanno nella pagina Releases

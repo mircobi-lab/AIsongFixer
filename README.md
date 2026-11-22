@@ -44,6 +44,10 @@ Nello Standalone (non nel plugin dentro Ableton) c'è un lettore in basso:
 
 Gli MP3 non si leggono ancora: su Suno scarica il brano in WAV. (L'MP3 richiede un'opzione di JUCE con avvertenze di licenza, la attiviamo solo se ti serve davvero.)
 
+## Icona
+
+L'icona (`assets/icon-1024.png`, generata da `scripts/make_icon.py`) è quella del Standalone su Mac e Windows, e anche del plugin VST3 e AU su Mac. Su Linux JUCE non incorpora l'icona nel programma: il PNG è nella zip, da usare per il lanciatore.
+
 ## Preset
 
 SUNO FULL MIX (predefinito), SUNO GENTLE, SUNO STRONG, UDIO, VOCAL STEM, INSTRUMENTAL STEM, FLAT (tutto spento, utile per partire da zero).

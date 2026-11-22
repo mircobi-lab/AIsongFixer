@@ -39,6 +39,7 @@ juce_add_plugin(MBStudio91AISongFixer
     COMPANY_WEBSITE "https://mbstudio91.fun"
     BUNDLE_ID "fun.mbstudio91.aisongfixer"
     PRODUCT_NAME "MBStudio91 AI Song Fixer"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon-1024.png"
     VERSION ${PROJECT_VERSION}
     PLUGIN_MANUFACTURER_CODE Mbst
     PLUGIN_CODE Mbaf
